@@ -1,0 +1,17 @@
+{
+  "name": "✦ Cosmic Dashboard",
+  "short_name": "Cosmic",
+  "description": "Personal astrology and divination — Western, Vedic, Numerology, Human Design, Runes, Synastry and more.",
+  "start_url": "/cosmic-dashboard/",
+  "scope": "/cosmic-dashboard/",
+  "display": "standalone",
+  "background_color": "#060408",
+  "theme_color": "#0e0a1f",
+  "orientation": "portrait-primary",
+  "lang": "en",
+  "categories": ["lifestyle", "utilities"],
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}
