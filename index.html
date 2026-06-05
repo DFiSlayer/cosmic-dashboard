@@ -672,18 +672,19 @@ function calcASC(jd,lat,lng){
   return _n(asc);
 }
 function calcMC(jd,lng){var lst=_n(_GMST(jd)+lng),ramc=_r(lst),e=_eps(jd);return _n(_d(Math.atan2(Math.sin(ramc),Math.cos(ramc)*Math.cos(e))));}
-// Placidus houses with longitude-based timezone estimate
+// Equal house system from ASC with longitude-based timezone estimate
+// Equal house: correct planet/house assignments, simpler than Placidus
+// MC placed in its true sign (may not be H10 cusp in equal house)
 function calcHouses(jd_local,latDeg,lngDeg){
   var tzOff=Math.round(lngDeg/15);
   var jd_utc=jd_local-tzOff/24;
-  var asc=calcASC(jd_utc,latDeg,lngDeg),mc=calcMC(jd_utc,lngDeg);
+  var asc=calcASC(jd_utc,latDeg,lngDeg);
+  var mc=calcMC(jd_utc,lngDeg);
   var ic=_n(mc+180),dsc=_n(asc+180);
-  var e=_eps(jd_utc),latR=_r(latDeg);
-  var ramc=_r(_n(_GMST(jd_utc)+lngDeg));
-  function pc(off){var a=ramc+off;return _n(_d(Math.atan2(-Math.cos(a),Math.sin(a)*Math.cos(e)+Math.tan(latR)*Math.sin(e))));}
-  var PI=Math.PI,t=PI/3;
-  return {asc:asc,mc:mc,ic:ic,dsc:dsc,tzOff:tzOff,
-    cusps:[asc,pc(PI+t),pc(PI+2*t),ic,_n(pc(2*t)+180),_n(pc(t)+180),dsc,_n(pc(PI+t)+180),_n(pc(PI+2*t)+180),mc,pc(t),pc(2*t)]};
+  // Equal house: 12 houses each 30° from ASC
+  var cusps=[];
+  for(var i=0;i<12;i++) cusps.push(_n(asc+i*30));
+  return {asc:asc,mc:mc,ic:ic,dsc:dsc,tzOff:tzOff,cusps:cusps};
 }
 
 

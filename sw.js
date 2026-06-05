@@ -1,5 +1,5 @@
 // ✦ Cosmic Dashboard — Service Worker v3.0
-var CACHE = 'cosmic-v4';
+var CACHE = 'cosmic-v5';
 var CORE = ['./index.html', './manifest.json'];
 
 self.addEventListener('install', function(e) {
