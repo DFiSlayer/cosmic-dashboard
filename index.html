@@ -664,7 +664,13 @@ function northNodeLon(jd){
 function _GMST(jd){var T=(jd-2451545)/36525;return _n(280.46061837+360.98564736629*(jd-2451545)+0.000387933*T*T-T*T*T/38710000);}
 function _eps(jd){var T=(jd-2451545)/36525;return _r(23.439291111-0.013004167*T-0.000000164*T*T);}
 // Ascendant and MC
-function calcASC(jd,lat,lng){var lst=_n(_GMST(jd)+lng),ramc=_r(lst),e=_eps(jd),latR=_r(lat);return _n(_d(Math.atan2(-Math.cos(ramc),Math.sin(ramc)*Math.cos(e)+Math.tan(latR)*Math.sin(e))));}
+function calcASC(jd,lat,lng){
+  var lst=_n(_GMST(jd)+lng),ramc=_r(lst),e=_eps(jd),latR=_r(lat);
+  var y=-Math.cos(ramc),x=Math.sin(ramc)*Math.cos(e)+Math.tan(latR)*Math.sin(e);
+  var asc=_d(Math.atan2(y,x));
+  if(Math.cos(ramc)>0)asc+=180; // quadrant correction
+  return _n(asc);
+}
 function calcMC(jd,lng){var lst=_n(_GMST(jd)+lng),ramc=_r(lst),e=_eps(jd);return _n(_d(Math.atan2(Math.sin(ramc),Math.cos(ramc)*Math.cos(e))));}
 // Placidus houses with longitude-based timezone estimate
 function calcHouses(jd_local,latDeg,lngDeg){
