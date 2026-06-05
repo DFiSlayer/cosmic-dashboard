@@ -829,10 +829,13 @@ function calcFullChart(p) {
   var nnL   = northNodeLon(jd);
   var snL   = _n(nnL+180);
 
+  var marL  = _mars(tau);
+
   var corePlanets = [
     {name:'Sun',        lon:sunL},
     {name:'Moon',       lon:moonL},
     {name:'Venus',      lon:venL},
+    {name:'Mars',       lon:marL},
     {name:'North Node', lon:nnL},
     {name:'South Node', lon:snL}
   ];
@@ -898,72 +901,62 @@ function calcFullChart(p) {
 function buildAstrology(p) {
   var sign=sunSign(p.dob),elmt=EL[sign],mod=MOD[sign];
   var month=parseInt(p.dob.split('-')[1]),bs=BS[month];
-  var f=document.createDocumentFragment();
-  var container=el('div',{},[]);
-  f.appendChild(container);
 
-  // Planet colors and glyphs for the big 6
-  var COLORS6={Sun:'#fbbf24',Moon:'#e2e8f0',Venus:'#f472b6','North Node':'#34d399','South Node':'#f97316',Ascendant:'#34d399',Midheaven:'#facc15'};
-  var GLYPHS6={Sun:'☀️',Moon:'🌙',Venus:'♀','North Node':'☊','South Node':'☋',Ascendant:'ASC',Midheaven:'MC'};
-  var MEANINGS6={
-    Sun:'Core identity, ego, and conscious will. The self you are actively becoming.',
-    Moon:'Emotional nature, instincts, and subconscious patterns. What makes you feel safe and at home.',
-    Venus:'Love, beauty, values, and attraction. What you desire and what brings you deep pleasure.',
+  // Return a single div — async fills it in place
+  var root = el('div',{style:{animation:'fadeIn 0.2s ease'}},[]);
+
+  var COLORS6 = {Sun:'#fbbf24',Moon:'#e2e8f0',Venus:'#f472b6',Mars:'#ef4444','North Node':'#34d399','South Node':'#f97316',Ascendant:'#34d399',Midheaven:'#facc15'};
+  var GLYPHS6  = {Sun:'☀️',Moon:'🌙',Venus:'♀',Mars:'♂','North Node':'☊','South Node':'☋',Ascendant:'ASC',Midheaven:'MC'};
+  var MEANINGS6= {
+    Sun:'Core identity, ego, and conscious will — the self you are actively becoming.',
+    Moon:'Emotional nature, instincts, and subconscious patterns. What makes you feel safe.',
+    Venus:'Love, beauty, values, and attraction. What you desire and what brings deep pleasure.',
     'North Node':'Your karmic direction — the path your soul is evolving toward in this lifetime.',
+    Mars:'Drive, ambition, desire, and how you assert yourself. Your instinct when action is required.',
     'South Node':'Your karmic past — natural gifts from prior lives, and patterns to move beyond.',
-    Ascendant:'Your Rising sign — the zodiac sign rising at birth. Governs first impressions, the body, and how you meet the world.',
-    Midheaven:'The highest point of your chart. Governs career, reputation, and your public role in the world.'
+    Ascendant:'Your Rising sign — governs first impressions, the body, and how you meet the world.',
+    Midheaven:'The highest point of your chart — governs career, reputation, and public role.'
   };
 
-  // Loading state
-  container.appendChild(el('div',{style:{padding:'20px 0',textAlign:'center',color:'rgba(255,255,255,0.3)',fontSize:'12px'}},[
+  // Show spinner immediately
+  root.appendChild(el('div',{style:{padding:'20px 0',textAlign:'center',color:'rgba(255,255,255,0.3)',fontSize:'12px'}},[
     el('div',{style:{fontSize:'20px',marginBottom:'6px'}},['⟳']),
     'Calculating...'
   ]));
 
-  calcFullChart(p).then(function(data){
-    container.innerHTML='';
+  calcFullChart(p).then(function(data) {
+    // Clear spinner
+    root.innerHTML = '';
 
-    if(!data){
-      container.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px'}},['Calculation error — please check birth date.']));
+    if(!data) {
+      root.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px'}},['Calculation error.']));
       return;
     }
 
-    // ── BIG 6 PLACEMENTS ──────────────────────────
-    container.appendChild(shead('✦','Key Placements'));
-
-    var planets = data.planets||[];
-    var order = ['Sun','Moon','Venus','Ascendant','Midheaven','North Node','South Node'];
+    // ── KEY PLACEMENTS ────────────────────────────
+    root.appendChild(shead('✦','Key Placements'));
+    var order=['Sun','Moon','Venus','Mars','Ascendant','Midheaven','North Node','South Node'];
+    var planets=data.planets||[];
     order.forEach(function(name){
-      var pl = planets.find(function(p){return p.name===name;});
-      if(!pl) return;
-      var sign2=pl.sign||'';
-      var deg=typeof pl.position==='number'?pl.position.toFixed(1)+'°':'';
-      var house=pl.house;
-      var color=COLORS6[name]||'white';
-      var glyph=GLYPHS6[name]||'●';
-      var meaning=MEANINGS6[name]||'';
-      var sigDesc=sign2?(SM[sign2]||''):'';
+      var pl=planets.find(function(x){return x.name===name;});
+      if(!pl)return;
+      var sign2=pl.sign||'',deg=typeof pl.position==='number'?pl.position.toFixed(1)+'°':'',house=pl.house;
+      var color=COLORS6[name]||'white',glyph=GLYPHS6[name]||'●';
+      var meaning=MEANINGS6[name]||'',sigDesc=sign2?(SM[sign2]||''):'';
       var fullDesc=meaning+(sigDesc?' ¶ In '+sign2+': '+sigDesc:'');
       var sub=((deg?deg+' ':'')+(house?'H'+house:'')).trim();
-      container.appendChild(expandRow(
-        glyph+' '+name,
-        (SG[sign2]||'')+' '+sign2,
-        sub||null,
-        fullDesc||null,
-        color
-      ));
+      root.appendChild(expandRow(glyph+' '+name,(SG[sign2]||'')+' '+sign2,sub||null,fullDesc||null,color));
     });
 
-    // ── NO TIME / CITY PROMPT ──────────────────────
+    // ── UNLOCK PROMPT ─────────────────────────────
     if(!p.tob||!p.pob){
       var missing=[];
-      if(!p.tob) missing.push('birth time');
-      if(!p.pob) missing.push('birth city');
-      container.appendChild(el('div',{style:{marginTop:'12px',background:'rgba(251,191,36,0.05)',border:'1px solid rgba(251,191,36,0.15)',borderRadius:'9px',padding:'12px'}},[
+      if(!p.tob)missing.push('birth time');
+      if(!p.pob)missing.push('birth city');
+      root.appendChild(el('div',{style:{marginTop:'12px',background:'rgba(251,191,36,0.05)',border:'1px solid rgba(251,191,36,0.15)',borderRadius:'9px',padding:'12px'}},[
         el('div',{style:{color:'#fbbf24',fontSize:'11px',fontWeight:'600',marginBottom:'5px'}},['🔓 Add '+missing.join(' & ')+' to unlock Rising sign'+(p.tob?'':' and houses')]),
         el('div',{style:{marginTop:'8px'}},[
-          btn({background:'linear-gradient(135deg,#7c3aed,#a78bfa)',border:'none',borderRadius:'8px',color:'white',padding:'7px 14px',fontSize:'11px',letterSpacing:'0.05em'},'✏ Edit Chart',function(){
+          btn({background:'linear-gradient(135deg,#7c3aed,#a78bfa)',border:'none',borderRadius:'8px',color:'white',padding:'7px 14px',fontSize:'11px'},'✏ Edit Chart',function(){
             var i=people.indexOf(p);if(i>=0)buildEditModal(i);
           })
         ])
@@ -971,61 +964,49 @@ function buildAstrology(p) {
     }
 
     if(data.geoError){
-      container.appendChild(el('div',{style:{marginTop:'8px',background:'rgba(251,191,36,0.04)',border:'1px solid rgba(251,191,36,0.12)',borderRadius:'9px',padding:'9px 12px',color:'rgba(255,255,255,0.4)',fontSize:'11px'}},[
+      root.appendChild(el('div',{style:{marginTop:'8px',background:'rgba(251,191,36,0.04)',border:'1px solid rgba(251,191,36,0.12)',borderRadius:'9px',padding:'9px 12px',color:'rgba(255,255,255,0.4)',fontSize:'11px'}},[
         span({color:'#fbbf24'},'⚠ '),data.geoError
       ]));
     }
 
-    // ── SUN DETAIL ────────────────────────────────
-    container.appendChild(shead('☀️','Solar Nature'));
-    container.appendChild(expandRow('Element',elmt,null,'Fire: Aries Leo Sagittarius · Earth: Taurus Virgo Capricorn · Air: Gemini Libra Aquarius · Water: Cancer Scorpio Pisces',EC[elmt]));
-    container.appendChild(expandRow('Modality',mod,null,'Cardinal: initiators who start new cycles · Fixed: stabilizers who sustain · Mutable: adapters who bridge transitions'));
+    // ── SOLAR NATURE ─────────────────────────────
+    root.appendChild(shead('☀️','Solar Nature'));
+    root.appendChild(expandRow('Sign',(SG[sign]||'')+' '+sign,elmt+' · '+mod,SM[sign],EC[elmt]));
+    root.appendChild(expandRow('Element',elmt,null,'Fire: Aries Leo Sagittarius · Earth: Taurus Virgo Capricorn · Air: Gemini Libra Aquarius · Water: Cancer Scorpio Pisces',EC[elmt]));
+    root.appendChild(expandRow('Modality',mod,null,'Cardinal: initiators · Fixed: stabilizers · Mutable: adapters'));
 
-    // ── BIRTHSTONE ────────────────────────────────
-    container.appendChild(shead('💎','Birthstone'));
-    container.appendChild(infoCard('#34d399',bs.e,bs.s,'Month '+month,bs.m));
+    // ── BIRTHSTONE ───────────────────────────────
+    root.appendChild(shead('💎','Birthstone'));
+    root.appendChild(infoCard('#34d399',bs.e,bs.s,'Month '+month,bs.m));
 
-    // ── KNOWN PLACEMENTS ─────────────────────────
+    // ── NOTES ────────────────────────────────────
     if(p.notes){
-      container.appendChild(shead('✦','Notes'));
-      container.appendChild(el('div',{style:{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:'9px',padding:'10px 12px',color:'rgba(255,255,255,0.5)',fontSize:'12px',lineHeight:'1.8'}},[p.notes]));
+      root.appendChild(shead('✦','Notes'));
+      root.appendChild(el('div',{style:{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:'9px',padding:'10px 12px',color:'rgba(255,255,255,0.5)',fontSize:'12px',lineHeight:'1.8'}},[p.notes]));
     }
 
-    // ── ASPECTS (Sun/Moon/Venus/Nodes) ───────────
+    // ── ASPECTS ──────────────────────────────────
     var aspects=data.aspects||[];
     var major=aspects.filter(function(a){
       return['conjunction','opposition','trine','square','sextile'].indexOf((a.type||'').toLowerCase())>=0;
     }).slice(0,8);
     if(major.length>0){
-      container.appendChild(shead('△','Aspects'));
+      root.appendChild(shead('△','Aspects'));
       var aspColors={conjunction:'#fbbf24',opposition:'#ef4444',trine:'#34d399',square:'#fb923c',sextile:'#38bdf8'};
-      var aspDesc={
-        conjunction:'Union — these energies merge, creating intensity and a unified focus.',
-        opposition:'Tension — these energies pull in opposite directions, calling for integration.',
-        trine:'Flow — natural harmony and ease between these placements.',
-        square:'Challenge — productive friction that drives growth and decisive action.',
-        sextile:'Opportunity — compatible energies that reward effort and initiative.'
-      };
+      var aspDesc={conjunction:'Union — these energies merge into unified focus.',opposition:'Tension — opposite pulls demanding integration.',trine:'Flow — natural harmony and ease.',square:'Challenge — friction that drives growth.',sextile:'Opportunity — compatible energies rewarding effort.'};
       major.forEach(function(asp){
         var type=(asp.type||'').toLowerCase();
-        var p1=asp.planet1||'',p2=asp.planet2||'';
         var orb=typeof asp.orb==='number'?asp.orb.toFixed(1)+'°':'';
-        container.appendChild(expandRow(
-          p1+' '+type+' '+p2,
-          type.charAt(0).toUpperCase()+type.slice(1),
-          orb?'orb '+orb:'',
-          aspDesc[type]||null,
-          aspColors[type]||'white'
-        ));
+        root.appendChild(expandRow((asp.planet1||'')+' '+type+' '+(asp.planet2||''),type.charAt(0).toUpperCase()+type.slice(1),orb?'orb '+orb:'',aspDesc[type]||null,aspColors[type]||'white'));
       });
     }
 
   }).catch(function(e){
-    container.innerHTML='';
-    container.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px',lineHeight:'1.7'}},['Error: '+(e.message||'unknown')]));
+    root.innerHTML='';
+    root.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px'}},['Error: '+(e&&e.message||'unknown')]));
   });
 
-  return f;
+  return root;
 }
 
 function buildVedic(p){
@@ -1320,7 +1301,7 @@ function render(){
 
   // Header
   app.appendChild(el('div',{style:{padding:'16px 16px 8px',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',alignItems:'center',justifyContent:'space-between'}},[
-    el('div',null,[el('div',{style:{fontFamily:"'Playfair Display',serif",fontSize:'20px',fontWeight:'600',letterSpacing:'0.04em'}},['✦ Cosmic Dashboard']),el('div',{style:{color:'rgba(255,255,255,0.18)',fontSize:'9px',letterSpacing:'0.1em',marginTop:'1px'}},['v0.9 · '+people.length+' CHART'+(people.length===1?'':'S')+' SAVED · 9 SYSTEMS'])]),
+    el('div',null,[el('div',{style:{fontFamily:"'Playfair Display',serif",fontSize:'20px',fontWeight:'600',letterSpacing:'0.04em'}},['✦ Cosmic Dashboard ✦']),el('div',{style:{color:'rgba(255,255,255,0.18)',fontSize:'9px',letterSpacing:'0.1em',marginTop:'1px'}},['v0.9 · '+people.length+' CHART'+(people.length===1?'':'S')+' SAVED · 9 SYSTEMS'])]),
     el('div',{style:{display:'flex',gap:'6px'}},[
       btn({background:'rgba(167,139,250,0.1)',border:'1px solid rgba(167,139,250,0.25)',borderRadius:'8px',color:'#a78bfa',fontSize:'11px',padding:'5px 9px'},'Share',function(){buildShareModal();}),
       el('button',{id:'install-btn',style:{display:'none',alignItems:'center',gap:'4px',background:'linear-gradient(135deg,#34d399,#059669)',border:'none',borderRadius:'8px',color:'white',fontSize:'11px',padding:'5px 9px',cursor:'pointer'}},['⬇ Install']),
