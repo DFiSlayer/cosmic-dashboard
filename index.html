@@ -813,121 +813,216 @@ function buildPlanetRow(planet) {
 }
 
 // ── TAB CONTENT ───────────────────────────────────────
+function calcFullChart(p) {
+  var cacheKey=(p.id||p.name)+'_'+p.dob+'_'+(p.tob||'')+'_'+(p.pob||'');
+  if(_chartCache[cacheKey])return Promise.resolve(_chartCache[cacheKey]);
+
+  var parts=p.dob.split('-').map(Number);
+  var hour=p.tob?(function(){var t=p.tob.split(':');return parseInt(t[0])+parseInt(t[1]||0)/60;}()):12;
+  var jd=julianDay(parts[0],parts[1],parts[2],hour);
+  var tau=(jd-2451545)/365250;
+
+  // Core placements - always calculated offline
+  var sunL  = sunLon(jd);
+  var moonL = moonLon(jd);
+  var venL  = _venus(tau);
+  var nnL   = northNodeLon(jd);
+  var snL   = _n(nnL+180);
+
+  var corePlanets = [
+    {name:'Sun',        lon:sunL},
+    {name:'Moon',       lon:moonL},
+    {name:'Venus',      lon:venL},
+    {name:'North Node', lon:nnL},
+    {name:'South Node', lon:snL}
+  ];
+
+  function buildResult(cusps, asc, mc) {
+    var planets = corePlanets.map(function(pl){
+      return {name:pl.name, sign:lonToSign(pl.lon), position:parseFloat(lonToDeg(pl.lon)),
+              longitude:pl.lon, house:cusps?lonToHouse(pl.lon,cusps):null};
+    });
+    if(asc) planets.push({name:'Ascendant', sign:lonToSign(asc), position:parseFloat(lonToDeg(asc)), longitude:asc, house:1});
+    if(mc)  planets.push({name:'Midheaven', sign:lonToSign(mc),  position:parseFloat(lonToDeg(mc)),  longitude:mc,  house:10});
+    return {
+      planets: planets,
+      ascendant: asc?{sign:lonToSign(asc),position:parseFloat(lonToDeg(asc)),longitude:asc}:null,
+      midheaven:  mc ?{sign:lonToSign(mc), position:parseFloat(lonToDeg(mc)), longitude:mc} :null,
+      houses: cusps?cusps.map(function(c,i){return{number:i+1,sign:lonToSign(c),position:parseFloat(lonToDeg(c)),longitude:c};}): [],
+      aspects: calcAspects(corePlanets),
+      calculated:'vsop87'
+    };
+  }
+
+  // No birth time — core planets only, no houses
+  if(!p.tob){
+    var r=buildResult(null,null,null);
+    _chartCache[cacheKey]=r;
+    return Promise.resolve(r);
+  }
+
+  // No city — core planets only, no houses
+  if(!p.pob){
+    var r=buildResult(null,null,null);
+    r.geoError='Add birth city to unlock Rising sign, Midheaven, and houses.';
+    _chartCache[cacheKey]=r;
+    return Promise.resolve(r);
+  }
+
+  // Has time + city — geocode for ASC/MC/houses
+  return fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(p.pob)+'&format=json&limit=1&accept-language=en',
+    {headers:{'User-Agent':'CosmicDashboard/1.0'}})
+  .then(function(r){return r.json();})
+  .then(function(geo){
+    if(!geo||!geo[0]){
+      var r=buildResult(null,null,null);
+      r.geoError='City not found. Try e.g. "Los Angeles, CA, USA".';
+      _chartCache[cacheKey]=r;
+      return r;
+    }
+    var lat=parseFloat(geo[0].lat),lng=parseFloat(geo[0].lon);
+    var h=calcHouses(jd,lat,lng);
+    var result=buildResult(h.cusps,h.asc,h.mc);
+    result.tzOff=h.tzOff;
+    _chartCache[cacheKey]=result;
+    return result;
+  })
+  .catch(function(){
+    var r=buildResult(null,null,null);
+    r.geoError='No internet for city lookup — showing core placements only.';
+    _chartCache[cacheKey]=r;
+    return r;
+  });
+}
+
 function buildAstrology(p) {
-  var sign=sunSign(p.dob),elmt=EL[sign],mod=MOD[sign],month=parseInt(p.dob.split('-')[1]),bs=BS[month];
+  var sign=sunSign(p.dob),elmt=EL[sign],mod=MOD[sign];
+  var month=parseInt(p.dob.split('-')[1]),bs=BS[month];
   var f=document.createDocumentFragment();
   var container=el('div',{},[]);
   f.appendChild(container);
 
-  // Always show Sun, Element, Modality, Birthstone
-  container.appendChild(shead('☀️','Natal Chart'));
-  container.appendChild(expandRow('Sun',(SG[sign]||'')+' '+sign,elmt+' · '+mod,SM[sign],EC[elmt]));
-  container.appendChild(expandRow('Element',elmt,null,'Fire: Aries Leo Sagittarius · Earth: Taurus Virgo Capricorn · Air: Gemini Libra Aquarius · Water: Cancer Scorpio Pisces',EC[elmt]));
-  container.appendChild(expandRow('Modality',mod,null,'Cardinal = initiators · Fixed = stabilizers · Mutable = adapters'));
+  // Planet colors and glyphs for the big 6
+  var COLORS6={Sun:'#fbbf24',Moon:'#e2e8f0',Venus:'#f472b6','North Node':'#34d399','South Node':'#f97316',Ascendant:'#34d399',Midheaven:'#facc15'};
+  var GLYPHS6={Sun:'☀️',Moon:'🌙',Venus:'♀','North Node':'☊','South Node':'☋',Ascendant:'ASC',Midheaven:'MC'};
+  var MEANINGS6={
+    Sun:'Core identity, ego, and conscious will. The self you are actively becoming.',
+    Moon:'Emotional nature, instincts, and subconscious patterns. What makes you feel safe and at home.',
+    Venus:'Love, beauty, values, and attraction. What you desire and what brings you deep pleasure.',
+    'North Node':'Your karmic direction — the path your soul is evolving toward in this lifetime.',
+    'South Node':'Your karmic past — natural gifts from prior lives, and patterns to move beyond.',
+    Ascendant:'Your Rising sign — the zodiac sign rising at birth. Governs first impressions, the body, and how you meet the world.',
+    Midheaven:'The highest point of your chart. Governs career, reputation, and your public role in the world.'
+  };
 
-  if(p.notes){
-    container.appendChild(shead('✦','Known Placements'));
-    container.appendChild(el('div',{style:{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:'9px',padding:'10px 12px',color:'rgba(255,255,255,0.5)',fontSize:'12px',lineHeight:'1.8'}},[p.notes]));
-  }
-
-  container.appendChild(shead('💎','Birthstone'));
-  container.appendChild(infoCard('#34d399',bs.e,bs.s,'Month '+month,bs.m));
-
-  // Planet section — always shown
-  var planetSection=el('div',{},[]);
-  container.appendChild(planetSection);
-
-  // Show loading spinner while calcFullChart runs
-  planetSection.appendChild(el('div',{style:{marginTop:'10px',background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.07)',borderRadius:'9px',padding:'14px',textAlign:'center',color:'rgba(255,255,255,0.35)',fontSize:'12px'}},
-    [el('div',{style:{fontSize:'18px',marginBottom:'6px'}},['⟳']),'Calculating chart...']));
+  // Loading state
+  container.appendChild(el('div',{style:{padding:'20px 0',textAlign:'center',color:'rgba(255,255,255,0.3)',fontSize:'12px'}},[
+    el('div',{style:{fontSize:'20px',marginBottom:'6px'}},['⟳']),
+    'Calculating...'
+  ]));
 
   calcFullChart(p).then(function(data){
-    planetSection.innerHTML='';
+    container.innerHTML='';
 
-    // Show "add birth time" prompt if no tob
-    if(!p.tob){
-      planetSection.appendChild(el('div',{style:{marginTop:'4px',background:'rgba(251,191,36,0.05)',border:'1px solid rgba(251,191,36,0.15)',borderRadius:'9px',padding:'12px'}},[
-        el('div',{style:{color:'#fbbf24',fontSize:'12px',fontWeight:'600',marginBottom:'6px'}},['🔓 Unlock Full Planetary Chart']),
-        el('div',{style:{color:'rgba(255,255,255,0.5)',fontSize:'12px',lineHeight:'1.8'}},['Add birth time to see all planets, houses, Rising sign, MC, and aspects.']),
-        el('div',{style:{marginTop:'10px'}},[
-          btn({background:'linear-gradient(135deg,#7c3aed,#a78bfa)',border:'none',borderRadius:'8px',color:'white',padding:'8px 16px',fontSize:'11px',letterSpacing:'0.06em'},'✏ Add Birth Time',function(){
-            var idx=people.indexOf(p);if(idx>=0)buildEditModal(idx);
+    if(!data){
+      container.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px'}},['Calculation error — please check birth date.']));
+      return;
+    }
+
+    // ── BIG 6 PLACEMENTS ──────────────────────────
+    container.appendChild(shead('✦','Key Placements'));
+
+    var planets = data.planets||[];
+    var order = ['Sun','Moon','Venus','Ascendant','Midheaven','North Node','South Node'];
+    order.forEach(function(name){
+      var pl = planets.find(function(p){return p.name===name;});
+      if(!pl) return;
+      var sign2=pl.sign||'';
+      var deg=typeof pl.position==='number'?pl.position.toFixed(1)+'°':'';
+      var house=pl.house;
+      var color=COLORS6[name]||'white';
+      var glyph=GLYPHS6[name]||'●';
+      var meaning=MEANINGS6[name]||'';
+      var sigDesc=sign2?(SM[sign2]||''):'';
+      var fullDesc=meaning+(sigDesc?' ¶ In '+sign2+': '+sigDesc:'');
+      var sub=((deg?deg+' ':'')+(house?'H'+house:'')).trim();
+      container.appendChild(expandRow(
+        glyph+' '+name,
+        (SG[sign2]||'')+' '+sign2,
+        sub||null,
+        fullDesc||null,
+        color
+      ));
+    });
+
+    // ── NO TIME / CITY PROMPT ──────────────────────
+    if(!p.tob||!p.pob){
+      var missing=[];
+      if(!p.tob) missing.push('birth time');
+      if(!p.pob) missing.push('birth city');
+      container.appendChild(el('div',{style:{marginTop:'12px',background:'rgba(251,191,36,0.05)',border:'1px solid rgba(251,191,36,0.15)',borderRadius:'9px',padding:'12px'}},[
+        el('div',{style:{color:'#fbbf24',fontSize:'11px',fontWeight:'600',marginBottom:'5px'}},['🔓 Add '+missing.join(' & ')+' to unlock Rising sign'+(p.tob?'':' and houses')]),
+        el('div',{style:{marginTop:'8px'}},[
+          btn({background:'linear-gradient(135deg,#7c3aed,#a78bfa)',border:'none',borderRadius:'8px',color:'white',padding:'7px 14px',fontSize:'11px',letterSpacing:'0.05em'},'✏ Edit Chart',function(){
+            var i=people.indexOf(p);if(i>=0)buildEditModal(i);
           })
         ])
       ]));
     }
 
-    if(!data){
-      planetSection.appendChild(el('div',{style:{background:'rgba(239,68,68,0.06)',border:'1px solid rgba(239,68,68,0.18)',borderRadius:'9px',padding:'11px 13px',color:'rgba(255,255,255,0.45)',fontSize:'12px',lineHeight:'1.7'}},[
-        span({color:'#ef4444'},'⚠ Calculation error.'),' Please check birth date format.'
-      ]));
-      return;
-    }
-
-    // Show geo error if location lookup failed
     if(data.geoError){
-      planetSection.appendChild(el('div',{style:{background:'rgba(251,191,36,0.05)',border:'1px solid rgba(251,191,36,0.15)',borderRadius:'9px',padding:'9px 12px',marginBottom:'8px',color:'rgba(255,255,255,0.45)',fontSize:'11px',lineHeight:'1.7'}},[
-        span({color:'#fbbf24'},'⚠ '),' '+data.geoError
+      container.appendChild(el('div',{style:{marginTop:'8px',background:'rgba(251,191,36,0.04)',border:'1px solid rgba(251,191,36,0.12)',borderRadius:'9px',padding:'9px 12px',color:'rgba(255,255,255,0.4)',fontSize:'11px'}},[
+        span({color:'#fbbf24'},'⚠ '),data.geoError
       ]));
     }
 
-    // Ascendant + MC
-    var asc=data.ascendant,mc=data.midheaven;
-    if(asc||mc){
-      planetSection.appendChild(shead('⬆','Angles'));
-      planetSection.appendChild(el('div',{style:{color:'rgba(255,255,255,0.3)',fontSize:'11px',marginBottom:'8px'}},['Timezone estimated from birth city longitude (±30 min). For exact degrees verify your local birth time.']));
-      if(asc){var as=asc.sign||'',ad=asc.position||'';planetSection.appendChild(expandRow('ASC  Rising',(SG[as]||'')+' '+as,ad+'°','Your Ascendant — the sign rising on the eastern horizon at birth. Governs your outward appearance and first impressions. '+(SM[as]||''),'#34d399'));}
-      if(mc){var ms=mc.sign||'',md=mc.position||'';planetSection.appendChild(expandRow('MC  Midheaven',(SG[ms]||'')+' '+ms,md+'°','Your Midheaven — the highest point of the chart. Governs career, public reputation, and life direction. '+(SM[ms]||''),'#facc15'));}
+    // ── SUN DETAIL ────────────────────────────────
+    container.appendChild(shead('☀️','Solar Nature'));
+    container.appendChild(expandRow('Element',elmt,null,'Fire: Aries Leo Sagittarius · Earth: Taurus Virgo Capricorn · Air: Gemini Libra Aquarius · Water: Cancer Scorpio Pisces',EC[elmt]));
+    container.appendChild(expandRow('Modality',mod,null,'Cardinal: initiators who start new cycles · Fixed: stabilizers who sustain · Mutable: adapters who bridge transitions'));
+
+    // ── BIRTHSTONE ────────────────────────────────
+    container.appendChild(shead('💎','Birthstone'));
+    container.appendChild(infoCard('#34d399',bs.e,bs.s,'Month '+month,bs.m));
+
+    // ── KNOWN PLACEMENTS ─────────────────────────
+    if(p.notes){
+      container.appendChild(shead('✦','Notes'));
+      container.appendChild(el('div',{style:{background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',borderRadius:'9px',padding:'10px 12px',color:'rgba(255,255,255,0.5)',fontSize:'12px',lineHeight:'1.8'}},[p.notes]));
     }
 
-    // Planets
-    var planets=data.planets||[];
-    if(planets.length>0){
-      planetSection.appendChild(shead('🪐','Planets'));
-      planets.forEach(function(planet){
-        if(planet.name==='Sun')return;
-        var name=planet.name,sign2=planet.sign||'',house=planet.house;
-        var deg=typeof planet.position==='number'?planet.position.toFixed(1)+'°':'';
-        var color=PLANET_COLORS[name]||'white';
-        var glyph=PLANET_GLYPHS[name]||'●';
-        var meaning=PLANET_MEANINGS[name]||'';
-        var sigDesc=sign2?(SM[sign2]||''):'';
-        var fullDesc=meaning+(sigDesc?' | In '+sign2+': '+sigDesc:'');
-        var subStr=((deg?deg+' ':'')+(house?'H'+house:'')).trim();
-        planetSection.appendChild(expandRow(glyph+' '+name,(SG[sign2]||'')+' '+sign2,subStr||null,fullDesc||null,color));
-      });
-    }
-
-    // Houses
-    var houses=data.houses||[];
-    if(houses.length>0){
-      planetSection.appendChild(shead('🏠','Houses'));
-      planetSection.appendChild(el('div',{style:{color:'rgba(255,255,255,0.3)',fontSize:'11px',marginBottom:'8px'}},['Tap any house to read its meaning.']));
-      houses.forEach(function(house){
-        var num=house.number,hs=house.sign||'',hd=typeof house.position==='number'?house.position.toFixed(1)+'°':'';
-        var meaning=HOUSE_MEANINGS[num]||'';
-        planetSection.appendChild(expandRow('House '+num,(SG[hs]||'')+' '+hs,hd,meaning?'House '+num+': '+meaning:null,'rgba(255,255,255,0.6)'));
-      });
-    }
-
-    // Aspects
+    // ── ASPECTS (Sun/Moon/Venus/Nodes) ───────────
     var aspects=data.aspects||[];
-    if(aspects.length>0){
-      planetSection.appendChild(shead('△','Major Aspects'));
-      var major=aspects.filter(function(a){return['conjunction','opposition','trine','square','sextile'].indexOf((a.type||'').toLowerCase())>=0;}).slice(0,12);
+    var major=aspects.filter(function(a){
+      return['conjunction','opposition','trine','square','sextile'].indexOf((a.type||'').toLowerCase())>=0;
+    }).slice(0,8);
+    if(major.length>0){
+      container.appendChild(shead('△','Aspects'));
+      var aspColors={conjunction:'#fbbf24',opposition:'#ef4444',trine:'#34d399',square:'#fb923c',sextile:'#38bdf8'};
+      var aspDesc={
+        conjunction:'Union — these energies merge, creating intensity and a unified focus.',
+        opposition:'Tension — these energies pull in opposite directions, calling for integration.',
+        trine:'Flow — natural harmony and ease between these placements.',
+        square:'Challenge — productive friction that drives growth and decisive action.',
+        sextile:'Opportunity — compatible energies that reward effort and initiative.'
+      };
       major.forEach(function(asp){
         var type=(asp.type||'').toLowerCase();
-        var p1=asp.planet1||asp.name1||'',p2=asp.planet2||asp.name2||'';
+        var p1=asp.planet1||'',p2=asp.planet2||'';
         var orb=typeof asp.orb==='number'?asp.orb.toFixed(1)+'°':'';
-        var aspColors={conjunction:'#fbbf24',opposition:'#ef4444',trine:'#34d399',square:'#fb923c',sextile:'#38bdf8'};
-        var aspDesc={conjunction:'Union — planets merge energies, creating intensity and focus.',opposition:'Tension — planets pull in opposite directions, demanding integration.',trine:'Flow — natural harmony and ease between these energies.',square:'Challenge — friction that drives growth and forces action.',sextile:'Opportunity — compatible energies that reward effort.'};
-        planetSection.appendChild(expandRow(p1+' '+type+' '+p2,type.charAt(0).toUpperCase()+type.slice(1),orb?'orb '+orb:'',aspDesc[type]||null,aspColors[type]||'white'));
+        container.appendChild(expandRow(
+          p1+' '+type+' '+p2,
+          type.charAt(0).toUpperCase()+type.slice(1),
+          orb?'orb '+orb:'',
+          aspDesc[type]||null,
+          aspColors[type]||'white'
+        ));
       });
     }
 
   }).catch(function(e){
-    planetSection.innerHTML='';
-    planetSection.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',fontSize:'12px',padding:'12px',lineHeight:'1.7'}},['Chart calculation error: '+(e.message||'unknown error')]));
+    container.innerHTML='';
+    container.appendChild(el('div',{style:{color:'rgba(255,255,255,0.35)',padding:'16px',fontSize:'12px',lineHeight:'1.7'}},['Error: '+(e.message||'unknown')]));
   });
 
   return f;
@@ -1350,77 +1445,5 @@ window.addEventListener('appinstalled', function() {
 });
 </script>
 </body>
-</htmlfunction calcFullChart(p) {
-  var cacheKey=(p.id||p.name)+'_'+p.dob+'_'+(p.tob||'')+'_'+(p.pob||'');
-  if(_chartCache[cacheKey])return Promise.resolve(_chartCache[cacheKey]);
-
-  var parts=p.dob.split('-').map(Number);
-  var hour=p.tob?(function(){var t=p.tob.split(':');return parseInt(t[0])+parseInt(t[1]||0)/60;}()):12;
-  var jd=julianDay(parts[0],parts[1],parts[2],hour);
-  var tau=(jd-2451545)/365250;
-
-  // All planets calculated instantly, no network needed
-  var rawPlanets=[
-    {name:'Sun',      lon:sunLon(jd)},
-    {name:'Moon',     lon:moonLon(jd)},
-    {name:'Mercury',  lon:_mercury(tau)},
-    {name:'Venus',    lon:_venus(tau)},
-    {name:'Mars',     lon:_mars(tau)},
-    {name:'Jupiter',  lon:_jupiter(tau)},
-    {name:'Saturn',   lon:_saturn(tau)},
-    {name:'Uranus',   lon:_uranus(tau)},
-    {name:'Neptune',  lon:_neptune(tau)},
-    {name:'Pluto',    lon:plutoLon(jd)},
-    {name:'North Node',lon:northNodeLon(jd)},
-    {name:'South Node',lon:_n(northNodeLon(jd)+180)}
-  ];
-
-  function buildResult(cusps, asc, mc) {
-    return {
-      planets: rawPlanets.map(function(pl){
-        return {name:pl.name, sign:lonToSign(pl.lon), position:parseFloat(lonToDeg(pl.lon)),
-                longitude:pl.lon, house:cusps?lonToHouse(pl.lon,cusps):null};
-      }),
-      ascendant: asc?{sign:lonToSign(asc),position:parseFloat(lonToDeg(asc)),longitude:asc}:null,
-      midheaven:  mc ?{sign:lonToSign(mc), position:parseFloat(lonToDeg(mc)), longitude:mc} :null,
-      houses: cusps?cusps.map(function(c,i){return{number:i+1,sign:lonToSign(c),position:parseFloat(lonToDeg(c)),longitude:c};}): [],
-      aspects: calcAspects(rawPlanets),
-      calculated: 'vsop87'
-    };
-  }
-
-  // No birth time — planets only
-  if(!p.tob){
-    var r=buildResult(null,null,null);
-    _chartCache[cacheKey]=r;
-    return Promise.resolve(r);
-  }
-
-  // Has birth time — geocode city for houses/ASC, then build result
-  function noLocation(msg) {
-    var r=buildResult(null,null,null);
-    r.geoError=msg;
-    _chartCache[cacheKey]=r;
-    return r;
-  }
-
-  if(!p.pob){
-    return Promise.resolve(noLocation('Add birth city to unlock houses and Rising sign.'));
-  }
-
-  return fetch('https://nominatim.openstreetmap.org/search?q='+encodeURIComponent(p.pob)+'&format=json&limit=1&accept-language=en',
-    {headers:{'User-Agent':'CosmicDashboard/1.0'}})
-  .then(function(r){return r.json();})
-  .then(function(geo){
-    if(!geo||!geo[0])return noLocation('City not found. Try e.g. "Los Angeles, CA, USA".');
-    var lat=parseFloat(geo[0].lat),lng=parseFloat(geo[0].lon);
-    var h=calcHouses(jd,lat,lng);
-    var result=buildResult(h.cusps,h.asc,h.mc);
-    result.tzOff=h.tzOff;
-    _chartCache[cacheKey]=result;
-    return result;
-  })
-  .catch(function(){
-    return noLocation('No internet for city lookup — showing planets only. Houses require a one-time online lookup.');
-  });
-}>
+</html
+>
